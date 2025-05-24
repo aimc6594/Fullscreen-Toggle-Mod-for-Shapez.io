@@ -1,7 +1,3 @@
-Aquí tienes todo convertido a formato Markdown (`.md`) limpio, bien estructurado y con sintaxis de código:
-
-------
-
 # 💡 Possible Improvements / Mejoras Posibles
 
 ------
@@ -145,7 +141,3 @@ loadExternalTranslations(jsonData) {
     this.updateTranslation();
 }
 ```
-
-------
-
-¿Quieres que te convierta esto también en un archivo descargable (`.md`) o preparado para GitHub?
