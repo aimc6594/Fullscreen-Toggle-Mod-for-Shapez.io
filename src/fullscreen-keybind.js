@@ -3,7 +3,7 @@ const METADATA = {
     website: "https://t.me/aimc6594",
     author: "aimc6594",
     name: "Fullscreen Toggle",
-    version: "1.6.1",
+    version: "1.7.0",
     id: "fullscreen-keybinding",
     description: "Allows toggling fullscreen mode via a dedicated keybinding, properly intercepting the key and using the game's native API. Compatible with web and Steam versions.",
     minimumGameVersion: ">=1.5.0",
@@ -118,30 +118,97 @@ const METADATA = {
 
 class Mod extends shapez.Mod {
     init() {
-        // Define the keybinding ID for toggling fullscreen
-        // Define el ID del keybinding para alternar pantalla completa
         this.keybindingId = "mod_fullscreen";
 
-        // Use queueMicrotask + setTimeout to delay initialization until the app and globals are ready
-        // Usamos queueMicrotask + setTimeout para retrasar la inicialización hasta que la app y globals estén listos
+        // Inyectar Material Icons por CDN
+        const iconsLink = document.createElement("link");
+        iconsLink.href = "https://fonts.googleapis.com/icon?family=Material+Icons";
+        iconsLink.rel = "stylesheet";
+        document.head.appendChild(iconsLink);
+
+        // Inyectar Materialize JS desde CDN
+        const jsScript = document.createElement("script");
+        jsScript.src = "https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js";
+        document.body.appendChild(jsScript);
+
+        // Registrar estilos personalizados para los toasts (Materialize y fallback)
+        this.modInterface.registerCss(`
+            .mod-toast, .mod-mz-toast {
+                position: fixed !important;
+                top: $scaled(30px) !important;
+                left: 50% !important;
+                transform: translateX(-50%) !important;
+                background: rgba(0, 0, 0, 0.85) !important;
+                color: white !important;
+                padding: $scaled(6px) $scaled(12px);
+                border-radius: $scaled(6px);
+                font-size: $scaled(12px);
+                z-index: 10000 !important;
+                display: flex !important;
+                align-items: center !important;
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity 0.3s ease-in-out;
+            }
+
+            .mod-toast.show {
+                opacity: 1;
+            }
+
+            .mod-toast-icon {
+                font-family: 'Material Icons';
+                font-size: $scaled(16px);
+                margin-right: $scaled(6px);
+                line-height: 1;
+            }
+        `);
+
+        // Esperar a que se cargue el script de Materialize
+        jsScript.onload = async () => {
+            // Esperar a que las fuentes estén completamente listas
+            await document.fonts?.ready;
+
+            const hasIcons = document.fonts.check("1em 'Material Icons'");
+            const hasMaterial = !!window.M?.toast;
+
+            // Mostrar un toast con retardo si Materialize no está presente (para evitar superposición inicial)
+            const showDelayedToast = (message, icon) => {
+                const delay = (!hasIcons || !hasMaterial) ? 5000 : 0;
+                setTimeout(() => this.showToast(message, icon), delay);
+            };
+
+            // Notificar disponibilidad de Materialize
+            if (hasMaterial) {
+                M.toast({
+                    html: `<i class="material-icons left">check_circle</i>Materialize disponible`,
+                    classes: "mod-mz-toast"
+                });
+            } else {
+                showDelayedToast("Materialize no disponible", "error");
+            }
+
+            // Notificar disponibilidad de Material Icons
+            if (hasIcons) {
+                showDelayedToast("Material Icons disponibles", "check_circle");
+            } else {
+                showDelayedToast("Material Icons no disponibles", "error");
+            }
+        };
+
+        // Retrasar inicialización para asegurar que todo el entorno esté cargado
         queueMicrotask(() => {
             setTimeout(() => {
                 const app = this.app;
 
-                // Wrapper detection for fullscreen API support
-                // Detección del wrapper que contiene el API de fullscreen
+                // Buscar el wrapper de plataforma si no está definido
                 let wrapper = app?.platformWrapper;
                 if (!wrapper || !wrapper.setFullscreen) {
-                    // Busca posibles wrappers en el contexto global (reflexión)
-                    // Searches possible wrappers in global context (reflection)
                     const candidates = Object.values(globalThis).filter(v =>
                         typeof v === "function" && v.name?.toLowerCase().includes("platform")
                     );
                     for (const candidate of candidates) {
                         try {
                             const inst = new candidate();
-                            // Verifica que el wrapper tenga métodos fullscreen
-                            // Checks wrapper has fullscreen methods
                             if ("setFullscreen" in inst && "getIsFullscreen" in inst) {
                                 wrapper = inst;
                                 break;
@@ -149,36 +216,43 @@ class Mod extends shapez.Mod {
                         } catch (_) {}
                     }
 
-                    if (wrapper) app.platformWrapper = wrapper;
-                    else console.warn("Mod pantalla completa: no se pudo encontrar un wrapper compatible.");
-                    // Warns if no compatible wrapper found
+                    // Asignar wrapper si fue encontrado
+                    if (wrapper) {
+                        app.platformWrapper = wrapper;
+                        this.showToast("Wrapper compatible encontrado", "check_circle");
+                    } else {
+                        const warnMsg = "Mod pantalla completa: no se pudo encontrar un wrapper compatible.";
+                        console.warn(warnMsg);
+                        this.showToast(warnMsg, "error");
+                    }
                 }
 
-                // Intercept the native F11 keydown event to override fullscreen toggle
-                // Intercepta el evento nativo F11 para manejar fullscreen de forma propia
+                // Interceptar la tecla F11 para alternar fullscreen y mostrar toast
                 window.addEventListener("keydown", (ev) => {
                     if (ev.key === "F11") {
-                        ev.preventDefault(); // Prevent browser default fullscreen toggle
+                        ev.preventDefault();
                         const isFull = app.settings.getSetting("fullscreen");
                         app.settings.updateSetting("fullscreen", !isFull);
+                        this.showToast(`F11 ${!isFull ? "activado" : "desactivado"}`, "fullscreen");
                     }
                 }, { passive: false });
 
-                // Register the ingame keybinding for fullscreen toggle
-                // Registra el keybinding dentro del juego
+                // Registrar atajo de teclado en la interfaz del juego
                 this.modInterface.registerIngameKeybinding({
                     id: this.keybindingId,
-                    keyCode: 122, // F11 key code
+                    keyCode: 122,
                     translation: this.getLocalizedMeta("name"),
                     handler: () => {
                         const isFull = this.app.settings.getSetting("fullscreen");
                         this.app.settings.updateSetting("fullscreen", !isFull);
-                        return shapez.STOP_PROPAGATION; // Stop further event propagation
+                        const toastMsg = `F11 ${!isFull ? "activado" : "desactivado"}`;
+                        this.showToast(toastMsg, "fullscreen");
+                        console.log(toastMsg); // Log para depuración
+                        return shapez.STOP_PROPAGATION;
                     },
                 });
 
-                // Optionally update the mod metadata translations if supported
-                // Actualiza metadata traducida si la interfaz lo soporta
+                // Actualizar traducciones del metadata si se soporta
                 if (this.modInterface.setModMetadata) {
                     this.modInterface.setModMetadata({
                         ...METADATA,
@@ -187,18 +261,50 @@ class Mod extends shapez.Mod {
                     });
                 }
 
-                // Hook language change watcher to update translations dynamically
-                // Engancha un watcher para actualizar traducciones si cambia el idioma
+                // Enlazar el watcher de idioma
                 this.hookLanguageWatcher();
-            }, 100); // 100ms delay ensures game environment is ready
+            }, 100);
         });
     }
 
     /**
-     * Returns localized text for a given key from METADATA.translations or fallback
-     * Devuelve el texto localizado para una clave desde METADATA.translations o fallback
-     * @param {string} key - Metadata key ("name" or "description")
-     * @returns {string} Localized string or fallback
+     * Muestra un toast adaptado al entorno (Materialize o fallback).
+     */
+    showToast(message, icon = "info", duration = 2500) {
+        const hasMaterialize = typeof M !== "undefined" && !!M.toast;
+        const hasIcons = document.fonts?.check("1em 'Material Icons'");
+
+        if (hasMaterialize) {
+            const html = hasIcons
+                ? `<i class="material-icons left">${icon}</i>${message}`
+                : message;
+
+            M.toast({
+                html,
+                displayLength: duration,
+                classes: "mod-mz-toast"
+            });
+            return;
+        }
+
+        // Fallback sin Materialize
+        const toast = document.createElement("div");
+        toast.className = "mod-toast";
+        toast.innerHTML = hasIcons
+            ? `<span class="mod-toast-icon">${icon}</span>${message}`
+            : message;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => toast.classList.add("show"));
+
+        setTimeout(() => {
+            toast.classList.remove("show");
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    /**
+     * Obtiene un valor localizado desde el bloque METADATA
      */
     getLocalizedMeta(key) {
         const lang = this.app?.settings?.getLanguage?.() || "en";
@@ -207,8 +313,7 @@ class Mod extends shapez.Mod {
     }
 
     /**
-     * Updates keybinding translation and mod metadata on language change
-     * Actualiza la traducción del keybinding y metadata del mod al cambiar idioma
+     * Actualiza el texto del keybinding y el metadata cuando cambia el idioma
      */
     updateTranslation() {
         if (this.modInterface && this.keybindingId) {
@@ -226,17 +331,12 @@ class Mod extends shapez.Mod {
     }
 
     /**
-     * Hooks the language setting watcher to detect language changes dynamically.
-     * Modifies settings.updateSetting to detect when "language" changes and trigger translation updates.
-     * 
-     * Engancha el watcher del idioma para detectar cambios dinámicos.
-     * Modifica settings.updateSetting para detectar cuando cambia "language" y actualizar traducciones.
+     * Enlaza un watcher para detectar cambios de idioma dinámicamente
      */
     hookLanguageWatcher() {
         const settings = this.app?.settings;
         if (!settings || !settings.updateSetting) return;
 
-        // Keep original updateSetting function
         const originalUpdate = settings.updateSetting.bind(settings);
 
         settings.updateSetting = (key, value) => {
